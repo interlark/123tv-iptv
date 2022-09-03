@@ -23,7 +23,6 @@ try:
         '--clean',
         '--onefile',
         '--windowed',
-        '--console',
         '-n', dist_filename,
     ]
 
