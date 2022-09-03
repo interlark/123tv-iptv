@@ -62,7 +62,7 @@ try:
         str(src_path),
     ]
 
-    # # Hidden import
+    # Hidden import
     build_cmd += [
         '--hidden-import', 'tqdm.asyncio',
         '--hidden-import', 'aiohttp',
