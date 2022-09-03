@@ -104,7 +104,7 @@ async def app() -> None:
     ]
 
     # Main window
-    window = sg.Window(f'123TV IPTV v{iptv_module.__version__}', layout, auto_size_text=True,
+    window = sg.Window(f'123TV IPTV v{iptv_module.VERSION}', layout, auto_size_text=True,
                        finalize=True, font='Any 12', use_default_focus=False)
 
     # Setup text widgets
