@@ -42,7 +42,6 @@ Channel = TypedDict('Channel', {'id': int, 'stream_id': str, 'tvguide_id': str,
 # $ sudo -E env "PATH=$PATH" 123tv-iptv uninstall-service
 #
 # Run:
-#
 # mpv http://127.0.0.1:6363/123tv.m3u8
 # vlc http://127.0.0.1:6363
 
@@ -276,7 +275,6 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
                    if name not in (aiohttp.hdrs.HOST, aiohttp.hdrs.USER_AGENT)}
         headers = {**headers, **HEADERS}
         url = '{0[schema]}://{0[chunk_url]}'.format(request.match_info)
-
         max_retries = 2  # Second retry for 403-forbidden recovery or response payload errors
 
         for retry in range(1, max_retries + 1):
@@ -488,7 +486,7 @@ def args_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         '-p', '--port', metavar='PORT',
-        type=int_range(min_value=1, max_value=65535), default=6363,
+        type=int_range(min_value=1, max_value=65535), default=6464,
         help='Serving port (default: %(default)s)'
     )
     parser.add_argument(
