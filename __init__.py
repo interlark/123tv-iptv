@@ -5,7 +5,7 @@
 import os
 import importlib.util
 
-import_list = ('main', 'args_parser', 'playlist_server')
+import_list = ('main', 'args_parser', 'playlist_server', 'VERSION')
 
 dir_path = os.path.dirname(os.path.abspath(__file__))
 module_path = os.path.join(dir_path, '123tv_iptv.py')

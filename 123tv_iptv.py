@@ -42,8 +42,8 @@ Channel = TypedDict('Channel', {'id': int, 'stream_id': str, 'tvguide_id': str,
 # $ sudo -E env "PATH=$PATH" 123tv-iptv uninstall-service
 #
 # Run:
-# mpv http://127.0.0.1:6363/123tv.m3u8
-# vlc http://127.0.0.1:6363
+# mpv http://127.0.0.1:6464/123tv.m3u8
+# vlc http://127.0.0.1:6464
 
 
 VERSION = '0.1.0'
