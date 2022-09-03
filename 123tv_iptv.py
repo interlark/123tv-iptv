@@ -44,7 +44,7 @@ Channel = TypedDict('Channel', {'id': int, 'stream_id': str, 'tvguide_id': str,
 # Run:
 #
 # mpv http://127.0.0.1:6363/123tv.m3u8
-# vlc http://127.0.0.1:6363 
+# vlc http://127.0.0.1:6363
 
 
 VERSION = '0.1.0'
@@ -276,7 +276,7 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
                    if name not in (aiohttp.hdrs.HOST, aiohttp.hdrs.USER_AGENT)}
         headers = {**headers, **HEADERS}
         url = '{0[schema]}://{0[chunk_url]}'.format(request.match_info)
-        
+
         max_retries = 2  # Second retry for 403-forbidden recovery or response payload errors
 
         for retry in range(1, max_retries + 1):
