@@ -46,7 +46,7 @@ Channel = TypedDict('Channel', {'id': int, 'stream_id': str, 'tvguide_id': str,
 # vlc http://127.0.0.1:6464
 
 
-VERSION = '0.1.0'
+VERSION = '0.1.1'
 USER_AGENT = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
               '(KHTML, like Gecko) Chrome/102.0.5005.63 Safari/537.36')
 HEADERS = {'User-Agent': USER_AGENT, 'Referer': 'http://azureedge.xyz/'}
