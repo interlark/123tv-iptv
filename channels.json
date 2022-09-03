@@ -1,0 +1,155 @@
+[
+    {
+        "id": 1,
+        "stream_id": "abc",
+        "tvguide_id": "9233011874",
+        "ustvgo_id": "ABC",
+        "name": "ABC",
+        "category": "Entertainment",
+        "language": "en"
+    },
+    {
+        "id": 2,
+        "stream_id": "bet",
+        "tvguide_id": "9233000226",
+        "ustvgo_id": "BET",
+        "name": "BET",
+        "category": "Lifestyle",
+        "language": "en"
+    },
+    {
+        "id": 3,
+        "stream_id": "cmt-country-music-television",
+        "tvguide_id": "9233000169",
+        "ustvgo_id": "CMT",
+        "name": "CMT",
+        "category": "Entertainment",
+        "language": "en"
+    },
+    {
+        "id": 4,
+        "stream_id": "comedy-central",
+        "tvguide_id": "9233009509",
+        "ustvgo_id": "Comedy",
+        "name": "Comedy Central",
+        "category": "Entertainment",
+        "language": "en"
+    },
+    {
+        "id": 5,
+        "stream_id": "disney-channel",
+        "tvguide_id": "9200011893",
+        "ustvgo_id": "Disney",
+        "name": "Disney",
+        "category": "Kids",
+        "language": "en"
+    },
+    {
+        "id": 6,
+        "stream_id": "disney-junior",
+        "tvguide_id": "9200016560",
+        "ustvgo_id": "DisneyJr",
+        "name": "Disney Junior",
+        "category": "Kids",
+        "language": "en"
+    },
+    {
+        "id": 7,
+        "stream_id": "disney-xd",
+        "tvguide_id": "9200004852",
+        "ustvgo_id": "DisneyXD",
+        "name": "Disney XD",
+        "category": "Kids",
+        "language": "en"
+    },
+    {
+        "id": 8,
+        "stream_id": "espn-20210711",
+        "tvguide_id": "9233007996",
+        "ustvgo_id": "ESPN",
+        "name": "ESPN",
+        "category": "Sports",
+        "language": "en"
+    },
+    {
+        "id": 9,
+        "stream_id": "espn2",
+        "tvguide_id": "9200016131",
+        "ustvgo_id": "ESPN2",
+        "name": "ESPN2",
+        "category": "Sports",
+        "language": "en"
+    },
+    {
+        "id": 10,
+        "stream_id": "espn-news",
+        "tvguide_id": "9200006523",
+        "ustvgo_id": "ESPNews",
+        "name": "ESPNews",
+        "category": "Sports",
+        "language": "en"
+    },
+    {
+        "id": 11,
+        "stream_id": "espnu",
+        "tvguide_id": "9233011350",
+        "ustvgo_id": "ESPNU",
+        "name": "ESPNU",
+        "category": "Sports",
+        "language": "en"
+    },
+    {
+        "id": 12,
+        "stream_id": "freeform-abc-family",
+        "tvguide_id": "9200000497",
+        "ustvgo_id": "Freeform",
+        "name": "Freeform",
+        "category": "Entertainment",
+        "language": "en"
+    },
+    {
+        "id": 13,
+        "stream_id": "mtv",
+        "tvguide_id": "9233015501",
+        "ustvgo_id": "MTV",
+        "name": "MTV",
+        "category": "Entertainment",
+        "language": "en"
+    },
+    {
+        "id": 14,
+        "stream_id": "paramount-network-spike",
+        "tvguide_id": "9233001931",
+        "ustvgo_id": "Paramount",
+        "name": "Paramount Network",
+        "category": "Entertainment",
+        "language": "en"
+    },
+    {
+        "id": 15,
+        "stream_id": "sec-network",
+        "tvguide_id": "9233002484",
+        "ustvgo_id": "SECN",
+        "name": "SEC Network",
+        "category": "Sports",
+        "language": "en"
+    },
+    {
+        "id": 16,
+        "stream_id": "tvland",
+        "tvguide_id": "9233005468",
+        "ustvgo_id": "TVLand",
+        "name": "TV Land",
+        "category": "Entertainment",
+        "language": "en"
+    },
+    {
+        "id": 17,
+        "stream_id": "vh1",
+        "tvguide_id": "9233000037",
+        "ustvgo_id": "VH1",
+        "name": "VH1",
+        "category": "Lifestyle",
+        "language": "en"
+    }
+]
