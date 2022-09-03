@@ -1,0 +1,2 @@
+git+https://github.com/interlark/123tv-iptv@master
+PySimpleGUI==4.60.0
