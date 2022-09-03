@@ -261,7 +261,7 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
 
                 # Localize chunks path
                 content = await response.text()
-                content = re.sub(r'(?<=\n)(https)(://)', r'/chunks/\1/', content)
+                content = re.sub(r'(?<=\n)(https?)://', r'/chunks/\1/', content)
 
                 if not content.startswith('#EXTM3U'):
                     return web.Response(status=404)
