@@ -112,11 +112,13 @@ async def retrieve_stream_url(channel: Channel, max_retries: int = 5) -> Optiona
             async with aiohttp.TCPConnector(ssl=False) as connector:
                 async with aiohttp.ClientSession(raise_for_status=True, connector=connector) as session:
                     async with session.get(url=url, timeout=timeout) as response:
+                        # Get channel iframe
                         resp_html = await response.text()
                         match = re.search(r'"(?P<iframe_url>https?://.*?\.m3u8\?embed=true)"', resp_html)
                         if not match:
                             return None
 
+                        # Get channel playlist URL
                         headers = {**HEADERS, 'Referer': url}
                         embed_url = match.group('iframe_url')
                         async with session.get(url=embed_url, timeout=timeout, headers=headers) as response:
@@ -125,7 +127,7 @@ async def retrieve_stream_url(channel: Channel, max_retries: int = 5) -> Optiona
                             if not match:
                                 return None
 
-                            # Check if playlist is valid
+                            # Check if it's a valid playlist
                             stream_url = match.group('stream_url')
                             async with session.get(url=stream_url, timeout=timeout,
                                                    headers=HEADERS) as response:
@@ -184,7 +186,7 @@ async def collect_urls(channels: List[Channel], parallel: int) -> List[Channel]:
 async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
                           access_logs: bool, icons_for_light_bg: bool,
                           use_uncompressed_tvguide: bool) -> None:
-    """Run proxying server with key rotation."""
+    """Run proxying server with keys rotation."""
     async def master_handler(request: web.Request) -> web.Response:
         """Master playlist handler."""
         return web.Response(
@@ -216,6 +218,7 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
                 headers=HEADERS, connector=connector
             ) as response:
                 content = await response.read()
+
                 return web.Response(
                     body=content, status=response.status
                 )
@@ -242,7 +245,6 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
     async def playlist_handler(request: web.Request) -> web.Response:
         """Channel playlist handler."""
         stream_id = request.match_info.get('stream_id')
-
         if stream_id not in streams:
             return web.Response(text='Stream not found!', status=404)
 
@@ -250,24 +252,39 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
         headers = {name: value for name, value in request.headers.items()
                    if name not in (aiohttp.hdrs.HOST, aiohttp.hdrs.USER_AGENT)}
         headers = {**headers, **HEADERS}
-        url = channel['stream_url'].url
+        max_retries = 2  # Second retry for auth keys refreshing
 
-        async with aiohttp.TCPConnector(ssl=False, force_close=True) as connector:
-            async with aiohttp.request(
-                method=request.method, url=url,
-                headers=headers, connector=connector
-            ) as response:
+        for _ in range(max_retries):
+            async with aiohttp.TCPConnector(ssl=False, force_close=True) as connector:
+                async with aiohttp.request(
+                    method=request.method, url=channel['stream_url'].url,
+                    headers=headers, connector=connector
+                ) as response:
+                    # Proxy playlist's chunks
+                    content = await response.text()
+                    content = re.sub(r'(?<=\n)(https?)://', r'/chunks/\1/', content)
 
-                # Localize chunks path
-                content = await response.text()
-                content = re.sub(r'(?<=\n)(https?)://', r'/chunks/\1/', content)
+                    # Check if we need new auth key for the channel
+                    if response.status == 410:
+                        async with channel['refresh_lock']:
+                            if time.time() - channel['last_time_refreshed'] > 5:
+                                logger.info('Refreshing auth key for channel %s.', channel['name'])
+                                await retrieve_stream_url(channel, 2)
+                                channel['last_time_refreshed'] = time.time()
 
-                if not content.startswith('#EXTM3U'):
-                    return web.Response(status=404)
+                        continue
 
-                return web.Response(
-                    text=content, status=200
-                )
+                    # Not a valid playlist
+                    if not content.startswith('#EXTM3U'):
+                        return web.Response(status=404)
+
+                    # OK
+                    return web.Response(
+                        text=content, status=200
+                    )
+
+        # Failed to get new auth key
+        return web.Response(status=403)
 
     async def chunks_handler(request: web.Request) -> web.Response:
         """Chunks handler."""
@@ -275,7 +292,7 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
                    if name not in (aiohttp.hdrs.HOST, aiohttp.hdrs.USER_AGENT)}
         headers = {**headers, **HEADERS}
         url = '{0[schema]}://{0[chunk_url]}'.format(request.match_info)
-        max_retries = 2  # Second retry for 403-forbidden recovery or response payload errors
+        max_retries = 2  # Second retry for response payload errors recovering
 
         for retry in range(1, max_retries + 1):
             try:
@@ -299,14 +316,6 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
                 if retry >= max_retries:
                     return web.Response(text=e.message, status=e.status)
 
-                # Update auth keys
-                async with channels_update_lock:
-                    nonlocal channels_last_refreshed  # type: ignore
-                    if e.status == 403 and time.time() - channels_last_refreshed > 5:
-                        logger.info('Updating channel auth keys.')
-                        await collect_urls(channels, parallel)
-                        channels_last_refreshed = time.time()
-
             except aiohttp.ClientPayloadError as e:
                 if retry >= max_retries:
                     return web.Response(text=str(e), status=500)
@@ -314,7 +323,8 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
             except aiohttp.ClientError as e:
                 logger.error('[Retry %d/%d] Error occured during handling request: %s',
                              retry, max_retries, e, exc_info=True)
-                return web.Response(text=str(e), status=500)
+                if retry >= max_retries:
+                    return web.Response(text=str(e), status=500)
 
         return web.Response(text='', status=500)
 
@@ -323,17 +333,14 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
 
     # Retrieve available channels with their stream urls
     channels = await collect_urls(channels, parallel)
-
     if not channels:
         logger.error('No channels were retrieved!')
         return
 
-    channels_update_lock = asyncio.Lock()  # Lock for refreshing channels
-    channels_last_refreshed = .0  # Time of the last channel update
-
-    # Add stream origins
+    # Add channels sync tools
     for channel in channels:
-        channel['stream_origin'] = channel['stream_url'].origin
+        channel['refresh_lock'] = asyncio.Lock()  # Lock on channel's key refreshing
+        channel['last_time_refreshed'] = .0  # Time of the last channel's key refresh
 
     # Transform list into a map for better accessibility
     streams = {x['stream_id']: x for x in channels}
@@ -377,13 +384,14 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
         while True:
             await asyncio.sleep(delay)
     finally:
-        await runner.cleanup()  # cleanup used resources, release port
+        await runner.cleanup()  # Cleanup used resources, release port
 
 
 def service_command_handler(command: str, *exec_args: str) -> bool:
     """Linux service command handler."""
     import os
     import subprocess
+    import textwrap
 
     service_path = '/etc/systemd/system/123tv-iptv.service'
     service_name = os.path.basename(service_path)
@@ -395,22 +403,22 @@ def service_command_handler(command: str, *exec_args: str) -> bool:
 
     def install_service() -> bool:
         """Install systemd service."""
-        service_content = f'''
-[Unit]
-Description=123TV Free IPTV
-After=network.target
-StartLimitInterval=0
+        service_content = textwrap.dedent(f'''
+            [Unit]
+            Description=123TV Free IPTV
+            After=network.target
+            StartLimitInterval=0
 
-[Service]
-User={os.getlogin()}
-Type=simple
-Restart=always
-RestartSec=5
-ExecStart={' '.join(exec_args)}
+            [Service]
+            User={os.getlogin()}
+            Type=simple
+            Restart=always
+            RestartSec=5
+            ExecStart={' '.join(exec_args)}
 
-[Install]
-WantedBy=multi-user.target
-        '''
+            [Install]
+            WantedBy=multi-user.target
+        ''')
 
         if os.path.isfile(service_path):
             logger.error('Service %s already exists!', service_path)
