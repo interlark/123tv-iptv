@@ -6,7 +6,7 @@ from typing import Any
 
 from .paths import config_path
 
-iptv_module = __import__('123tv_iptv')
+import tv123_iptv
 
 
 def save_settings(settings: dict[str, Any]) -> None:
@@ -32,7 +32,7 @@ def load_settings() -> dict[str, Any]:
 
 def default_settings() -> dict[str, Any]:
     """Get default settings."""
-    parser = iptv_module.args_parser()
+    parser = tv123_iptv.args_parser()
     return {x.dest: x.default for x in parser._actions
             if x.default != argparse.SUPPRESS
             and x.dest != argparse.SUPPRESS}

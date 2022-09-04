@@ -6,6 +6,7 @@ import tkinter as tk
 from typing import Any, Awaitable
 
 import PySimpleGUI as sg
+import tv123_iptv
 
 from .error_popup import error_popup
 from .paths import image_data
@@ -13,7 +14,6 @@ from .settings import load_settings, save_settings
 from .utils import patch_tqdm, setup_text_widget
 from .widgets import MultilineLog
 
-iptv_module = __import__('123tv_iptv')
 logger = logging.getLogger('123tv_iptv')
 
 
@@ -104,7 +104,7 @@ async def app() -> None:
     ]
 
     # Main window
-    window = sg.Window(f'123TV IPTV v{iptv_module.VERSION}', layout, auto_size_text=True,
+    window = sg.Window(f'123TV IPTV v{tv123_iptv.VERSION}', layout, auto_size_text=True,
                        finalize=True, font='Any 12', use_default_focus=False)
 
     # Setup text widgets
@@ -125,7 +125,7 @@ async def app() -> None:
     window['-LOG-'].attach_logger(logging.getLogger('aiohttp.access'))
 
     # Patch tqdm to show progress on GUI
-    patch_tqdm(iptv_module.module.tqdm, window)
+    patch_tqdm(tv123_iptv.module.tqdm, window)
 
     # Sync params between window controls and settings
     def sync_settings(verbose: bool = True) -> bool:
@@ -213,7 +213,7 @@ async def app() -> None:
             loop = asyncio.get_running_loop()
             background_task = loop.create_task(
                 background_task_finished(
-                    iptv_module.playlist_server(**settings)
+                    tv123_iptv.playlist_server(**settings)
                 )
             )
 

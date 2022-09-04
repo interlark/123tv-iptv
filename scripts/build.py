@@ -43,7 +43,7 @@ try:
 
     # 123TV-IPTV fix
     iptv_module_dir = pathlib.Path(
-        __import__('123tv_iptv').__file__
+        __import__('tv123_iptv').__file__
     ).parent
 
     # Furl fix
