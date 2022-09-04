@@ -52,7 +52,7 @@ class AuthKeyRefreshPolicy(Enum):
     REFRESH_ALL_AT_ONCE = 2  # Refresh all auth keys at once (Eager strategy)
 
 
-VERSION = '0.1.1'
+VERSION = '0.1.2'
 USER_AGENT = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
               '(KHTML, like Gecko) Chrome/102.0.5005.63 Safari/537.36')
 HEADERS = {'User-Agent': USER_AGENT, 'Referer': 'http://azureedge.xyz/'}
@@ -145,6 +145,7 @@ async def retrieve_stream_url(channel: Channel, max_retries: int = 5) -> Optiona
                                     return channel
 
                         return None
+
         except Exception as e:
             is_exc_valid = any([isinstance(e, exc) for exc in exceptions])
             if not is_exc_valid:
@@ -281,6 +282,7 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
                                     logger.info('Refreshing auth key for channel %s.', channel['name'])
                                     await retrieve_stream_url(channel, 2)
                                     channel['last_time_refreshed'] = time.time()
+
                         elif AUTH_KEY_REFRESH_POLICY == AuthKeyRefreshPolicy.REFRESH_ALL_AT_ONCE:
                             # Update all the channels keys at once
                             async with channels_refresh_lock:
@@ -289,6 +291,7 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
                                     logger.info('Refreshing auth keys for all the channels.')
                                     await collect_urls(channels, parallel)
                                     channels_last_time_refreshed = time.time()
+
                         else:
                             raise ValueError('Unknown strategy for auth key refreshing.')
 
@@ -296,12 +299,15 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
 
                     # Not a valid playlist
                     if not content.startswith('#EXTM3U'):
-                        return web.Response(status=404)
+                        logger.warning('%s returned invalid playlist: %s', response.url, content)
+                        notfound_segment_url = furl(tvguide_base_url) / 'assets/404.ts'
+                        return web.Response(text=(
+                            '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:10\n'
+                            f'#EXTINF:10.000\n{notfound_segment_url}\n#EXT-X-ENDLIST'
+                        ))
 
                     # OK
-                    return web.Response(
-                        text=content, status=200
-                    )
+                    return web.Response(text=content, status=200)
 
         # Failed to get new auth key / keys
         return web.Response(status=403)
@@ -332,6 +338,7 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
                             body=content, status=response.status,
                             headers=headers
                         )
+
             except aiohttp.ClientResponseError as e:
                 if retry >= max_retries:
                     return web.Response(text=e.message, status=e.status)
@@ -363,10 +370,12 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
         for channel in channels:
             channel['refresh_lock'] = asyncio.Lock()  # Lock on a key refresh
             channel['last_time_refreshed'] = .0  # Time of the last key refresh
+
     elif AUTH_KEY_REFRESH_POLICY == AuthKeyRefreshPolicy.REFRESH_ALL_AT_ONCE:
         # Refresh all the keys at once
         channels_refresh_lock = asyncio.Lock()  # Lock on the keys refresh
         channels_last_time_refreshed = .0  # Time of the last keys refresh
+
     else:
         raise ValueError('Unknown strategy for auth key refreshing.')
 
@@ -392,8 +401,8 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
     app.router.add_get('/tvguide.xml.gz', tvguide_handler)  # tvguide compressed
     app.router.add_get('/logos/{filename:[^/]+}', logos_handler)  # logos
     app.router.add_get('/{stream_id}.m3u8', playlist_handler)  # playlist
-    app.router.add_get('/chunks/{schema}/{chunk_url:.*}', chunks_handler)  # chunks
-    app.router.add_get('/key/{keypath:[^/]+}', keys_handler)  # AES
+    app.router.add_get('/chunks/{schema}/{chunk_url:.+}', chunks_handler)  # chunks
+    app.router.add_get('/key/{keypath:.+}', keys_handler)  # AES
 
     runner = web.AppRunner(app)
     try:
@@ -411,6 +420,7 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
 
         while True:
             await asyncio.sleep(delay)
+
     finally:
         await runner.cleanup()  # Cleanup used resources, release port
 
@@ -467,7 +477,6 @@ def service_command_handler(command: str, *exec_args: str) -> bool:
 
     def uninstall_service() -> bool:
         """Uninstall systemd service."""
-
         if not os.path.isfile(service_path):
             logger.error('Service %s does not exist!', service_path)
             return True
