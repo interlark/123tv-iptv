@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import functools
 import io
 import json
 import logging
@@ -9,7 +10,7 @@ import pathlib
 import re
 import sys
 import time
-import functools
+from enum import Enum
 from typing import Any, Awaitable, Callable, List, Optional
 
 import aiohttp
@@ -46,10 +47,17 @@ Channel = TypedDict('Channel', {'id': int, 'stream_id': str, 'tvguide_id': str,
 # vlc http://127.0.0.1:6464
 
 
+class AuthKeyRefreshPolicy(Enum):
+    REFRESH_ONE_AT_A_TIME = 1  # Perform lazy auth key refresh (Lazy strategy)
+    REFRESH_ALL_AT_ONCE = 2  # Refresh all auth keys at once (Eager strategy)
+
+
 VERSION = '0.1.1'
 USER_AGENT = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
               '(KHTML, like Gecko) Chrome/102.0.5005.63 Safari/537.36')
 HEADERS = {'User-Agent': USER_AGENT, 'Referer': 'http://azureedge.xyz/'}
+AUTH_KEY_REFRESH_POLICY = AuthKeyRefreshPolicy.REFRESH_ALL_AT_ONCE
+
 
 logging.basicConfig(
     level=logging.INFO, format='%(asctime)s :: %(levelname)s :: %(message)s',
@@ -264,13 +272,25 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
                     content = await response.text()
                     content = re.sub(r'(?<=\n)(https?)://', r'/chunks/\1/', content)
 
-                    # Check if we need new auth key for the channel
+                    # Check if we need a key / the keys refresh
                     if response.status == 410:
-                        async with channel['refresh_lock']:
-                            if time.time() - channel['last_time_refreshed'] > 5:
-                                logger.info('Refreshing auth key for channel %s.', channel['name'])
-                                await retrieve_stream_url(channel, 2)
-                                channel['last_time_refreshed'] = time.time()
+                        if AUTH_KEY_REFRESH_POLICY == AuthKeyRefreshPolicy.REFRESH_ONE_AT_A_TIME:
+                            # Lazy auth key update
+                            async with channel['refresh_lock']:
+                                if time.time() - channel['last_time_refreshed'] > 5:
+                                    logger.info('Refreshing auth key for channel %s.', channel['name'])
+                                    await retrieve_stream_url(channel, 2)
+                                    channel['last_time_refreshed'] = time.time()
+                        elif AUTH_KEY_REFRESH_POLICY == AuthKeyRefreshPolicy.REFRESH_ALL_AT_ONCE:
+                            # Update all the channels keys at once
+                            async with channels_refresh_lock:
+                                nonlocal channels_last_time_refreshed  # type: ignore
+                                if time.time() - channels_last_time_refreshed > 5:
+                                    logger.info('Refreshing auth keys for all the channels.')
+                                    await collect_urls(channels, parallel)
+                                    channels_last_time_refreshed = time.time()
+                        else:
+                            raise ValueError('Unknown strategy for auth key refreshing.')
 
                         continue
 
@@ -283,7 +303,7 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
                         text=content, status=200
                     )
 
-        # Failed to get new auth key
+        # Failed to get new auth key / keys
         return web.Response(status=403)
 
     async def chunks_handler(request: web.Request) -> web.Response:
@@ -338,9 +358,17 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
         return
 
     # Add channels sync tools
-    for channel in channels:
-        channel['refresh_lock'] = asyncio.Lock()  # Lock on channel's key refreshing
-        channel['last_time_refreshed'] = .0  # Time of the last channel's key refresh
+    if AUTH_KEY_REFRESH_POLICY == AuthKeyRefreshPolicy.REFRESH_ONE_AT_A_TIME:
+        # Lazy auth key refresh
+        for channel in channels:
+            channel['refresh_lock'] = asyncio.Lock()  # Lock on a key refresh
+            channel['last_time_refreshed'] = .0  # Time of the last key refresh
+    elif AUTH_KEY_REFRESH_POLICY == AuthKeyRefreshPolicy.REFRESH_ALL_AT_ONCE:
+        # Refresh all the keys at once
+        channels_refresh_lock = asyncio.Lock()  # Lock on the keys refresh
+        channels_last_time_refreshed = .0  # Time of the last keys refresh
+    else:
+        raise ValueError('Unknown strategy for auth key refreshing.')
 
     # Transform list into a map for better accessibility
     streams = {x['stream_id']: x for x in channels}
