@@ -282,14 +282,14 @@ def render_playlist(channels: List[Channel], host: str, use_uncompressed_tvguide
 
 
 async def collect_urls(channels: List[Channel], parallel: int,
-                       do_not_filter_channels: bool) -> List[Channel]:
+                       keep_all_channels: bool) -> List[Channel]:
     """Collect channel stream URLs from 123tv.live web players."""
     logger.info('Extracting stream URLs from 123TV. Parallel requests: %d.', parallel)
     retrieve_tasks = [retrieve_stream_url(channel) for channel in channels]
     retrieved_channels = await gather_with_concurrency(parallel, *retrieve_tasks,
                                                        progress_title='Collect URLs')
 
-    channels_ok = channels if do_not_filter_channels else \
+    channels_ok = channels if keep_all_channels else \
         [x for x in retrieved_channels if x]
 
     report_msg = 'Extracted %d channels out of %d.'
@@ -325,7 +325,7 @@ def preprocess_playlist(content: str, referer_url: str, response_url: Optional[s
 async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
                           access_logs: bool, icons_for_light_bg: bool,
                           use_uncompressed_tvguide: bool,
-                          do_not_filter_channels: bool) -> None:
+                          keep_all_channels: bool) -> None:
     async def refresh_auth_key(channel: Channel) -> None:
         """Refresh auth key for the channel."""
         async with channel['refresh_lock']:
@@ -491,7 +491,7 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
     channels = load_dict('channels.json')
 
     # Retrieve available channels with their stream urls
-    channels = await collect_urls(channels, parallel, do_not_filter_channels)
+    channels = await collect_urls(channels, parallel, keep_all_channels)
     if not channels:
         logger.error('No channels were retrieved!')
         return
@@ -671,7 +671,7 @@ def args_parser() -> argparse.ArgumentParser:
         help='Enable access logging'
     )
     parser.add_argument(
-        '--do-not-filter-channels',
+        '--keep-all-channels',
         action='store_true',
         help='Do not filter out not working channels'
     ),
