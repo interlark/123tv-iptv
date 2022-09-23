@@ -52,7 +52,7 @@ Two iconsets for IPTV players with light and dark backgrounds
   123tv-iptv
   ```
 
-  <img alt="123TV-IPTV CLI screencast" width="666" src="https://user-images.githubusercontent.com/20641837/188278700-4d3a6082-e955-4fe9-acba-00de48581b90.png"/>
+  <img alt="123TV-IPTV CLI screencast" width="666" src="https://user-images.githubusercontent.com/20641837/192028421-592d8b27-bfa0-4444-aa20-e7b1ea1f05da.gif"/>
 
 
 | Optional argument                  | Description |
@@ -62,6 +62,7 @@ Two iconsets for IPTV players with light and dark backgrounds
 | --port 6464               | Server port. By default, the port is **6464**.           |
 | --parallel 10             | Number of parallel parsing requests. Default is **10**.          |
 | --use-uncompressed-tvguide| By default, master playlist has a link to **compressed** version of TV Guide:<br/>`url-tvg="http://127.0.0.1:6464/tvguide.xml.gz"`<br/>With this argument you can switch it to uncompressed:<br/>`url-tvg="http://127.0.0.1:6464/tvguide.xml"`           |
+| --keep-all-channels       | Do not filter out not working channels.
 
 <br />
 
@@ -79,8 +80,7 @@ sudo -E env "PATH=$PATH" 123tv-iptv uninstall-service
 ```
 
 ## ⚙️ Usage - GUI
-
-  <img alt="123TV-IPTV GUI screenshot" width="614" src="https://user-images.githubusercontent.com/20641837/188281122-9b4ce62b-5088-4366-adbd-b4d421b3d302.png"/>
+  <img alt="123TV-IPTV GUI screenshot" width="614" src="https://user-images.githubusercontent.com/20641837/192025393-c5b089e6-8311-4f57-af78-8f125cce71cc.png"/>
 
   If you don't like command line stuff, you can run GUI app and click "Start", simple as that.
   
