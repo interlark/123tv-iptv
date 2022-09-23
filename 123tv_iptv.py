@@ -176,7 +176,7 @@ async def retrieve_stream_url(channel: Channel, max_retries: int = 5) -> Optiona
         async with session.get(url=url, timeout=timeout,
                                headers=headers) as response:
             m3u8_content = await response.text()
-            return m3u8_content.startswith('#EXTM3U')
+            return m3u8_content.startswith('#EXTM3U')  # type: ignore
 
     async def retrieve_regular_channel(html_content: str, session: aiohttp.ClientSession) -> bool:
         iframe_match = re.search(r'"(?P<iframe_url>https?://.*?\.m3u8\?embed=true)"', html_content)
