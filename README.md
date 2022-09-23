@@ -183,4 +183,6 @@ To play and enjoy your free IPTV you need 2 URLs that this app provides:
       ```
 
 ## 👍 Support
-I would highly appreciate your support on this project ⠀<a href="https://www.buymeacoffee.com/interlark" target="_blank"><img alt="Buy Me A Coffee" src="https://cdn.buymeacoffee.com/buttons/default-orange.png" width="178" height="41"></a>
+- [123tv.live](http://123tv.live/) is wonderful project which can offer you a free IPTV, please support these guys buying VPN with their referral link.
+
+- Also I would highly appreciate your support on this project ⠀<a href="https://www.buymeacoffee.com/interlark" target="_blank"><img alt="Buy Me A Coffee" src="https://cdn.buymeacoffee.com/buttons/default-orange.png" width="178" height="41"></a>
