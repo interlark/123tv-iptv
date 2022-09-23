@@ -2,21 +2,26 @@
 
 import argparse
 import asyncio
+import base64
+import binascii
 import functools
+import hashlib
 import io
 import json
 import logging
 import pathlib
 import re
 import sys
+import textwrap
 import time
-from enum import Enum
-from typing import Any, Awaitable, Callable, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 import aiohttp
 import netifaces
+import pyaes
 from aiohttp import web
 from furl import furl
+from pyaes.util import strip_PKCS7_padding
 from tqdm.asyncio import tqdm
 
 if sys.version_info >= (3, 8):
@@ -26,7 +31,8 @@ else:
 
 Channel = TypedDict('Channel', {'id': int, 'stream_id': str, 'tvguide_id': str,
                                 'name': str, 'category': str, 'language': str,
-                                'ustvgo_id': str, 'stream_url': furl})
+                                'stream_url': furl, 'referer_url': str,
+                                'refresh_lock': asyncio.Lock, 'last_time_refreshed': float})
 
 # Fix for https://github.com/pyinstaller/pyinstaller/issues/1113
 ''.encode('idna')
@@ -47,16 +53,10 @@ Channel = TypedDict('Channel', {'id': int, 'stream_id': str, 'tvguide_id': str,
 # vlc http://127.0.0.1:6464
 
 
-class AuthKeyRefreshPolicy(Enum):
-    REFRESH_ONE_AT_A_TIME = 1  # Perform lazy auth key refresh (Lazy strategy)
-    REFRESH_ALL_AT_ONCE = 2  # Refresh all auth keys at once (Eager strategy)
-
-
-VERSION = '0.1.2'
+VERSION = '0.1.3'
 USER_AGENT = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
               '(KHTML, like Gecko) Chrome/102.0.5005.63 Safari/537.36')
-HEADERS = {'User-Agent': USER_AGENT, 'Referer': 'http://azureedge.xyz/'}
-AUTH_KEY_REFRESH_POLICY = AuthKeyRefreshPolicy.REFRESH_ALL_AT_ONCE
+HEADERS = {'User-Agent': USER_AGENT}
 
 
 logging.basicConfig(
@@ -108,6 +108,62 @@ async def gather_with_concurrency(n: int, *tasks: Awaitable[Any],
     return await gather(*[sem_task(x) for x in tasks])  # type: ignore
 
 
+def extract_obfuscated_link(content: str) -> str:
+    """Extract and decode obfuscated stream URL from 123TV channel page."""
+    start_text = textwrap.dedent(
+        """
+            var post_id = parseInt($('#'+'v'+'i'+'d'+'eo'+'-i'+'d').val());
+            $(document).ready(function(){
+        """
+    )
+
+    ob_line = content[content.index(start_text) + len(start_text):].splitlines()[0]
+    a, b, c = ob_line.split('};')
+    data_part, key = '', ''
+
+    # Parse data
+    arr = re.search(r'(?<=\[)[^\]]+(?=\])', a)
+    if arr:
+        for part in arr.group().split(','):
+            data_part += part.strip('\'')
+
+    try:
+        data = json.loads(base64.b64decode(data_part))
+    except (binascii.Error, json.JSONDecodeError):
+        return ''
+
+    # Parse key
+    for arr in re.findall(r'(?<=\[)[\d+\,]+(?=\])', b):
+        for dig in arr.split(','):  # type: ignore
+            key = chr(int(dig)) + key
+
+    # Decode playlist data
+    data['iterations'] = 999 if data['iterations'] <= 0 else data['iterations']
+    dec_key = hashlib.pbkdf2_hmac('sha512', key.encode('utf8'), bytes.fromhex(data['salt']),
+                                  data['iterations'], dklen=256 // 8)
+
+    aes = pyaes.AESModeOfOperationCBC(dec_key, iv=bytes.fromhex(data['iv']))
+    ciphertext = base64.b64decode(data['ciphertext'])
+    decrypted = b''
+    for idx in range(0, len(ciphertext), 16):
+        decrypted += aes.decrypt(ciphertext[idx: idx + 16])
+
+    target_link: str = strip_PKCS7_padding(decrypted).decode('utf8')
+    path = re.search(r'(?<=\')\S+(?=\';}$)', c)
+    if path:
+        target_link += path.group()
+    return target_link
+
+
+def ensure_absolute_url(url: str, relative_url: str) -> str:
+    """Ensure url is absolute. Makes it absolute if it's relative."""
+    if not url.startswith('http'):
+        url = furl(relative_url).origin + '/' + \
+            '/'.join(furl(relative_url).path.segments[:-1] + [url])
+
+    return url
+
+
 async def retrieve_stream_url(channel: Channel, max_retries: int = 5) -> Optional[Channel]:
     """Retrieve stream URL from web player with retries."""
     url = 'http://123tv.live/watch/' + channel['stream_id']
@@ -115,46 +171,94 @@ async def retrieve_stream_url(channel: Channel, max_retries: int = 5) -> Optiona
     exceptions = (asyncio.TimeoutError, aiohttp.ClientConnectionError,
                   aiohttp.ClientResponseError, aiohttp.ServerDisconnectedError)
 
+    async def is_valid_playlist_url(url: str, headers: Dict[str, str],
+                                    session: aiohttp.ClientSession) -> bool:
+        async with session.get(url=url, timeout=timeout,
+                               headers=headers) as response:
+            m3u8_content = await response.text()
+            return m3u8_content.startswith('#EXTM3U')
+
+    async def retrieve_regular_channel(html_content: str, session: aiohttp.ClientSession) -> bool:
+        iframe_match = re.search(r'"(?P<iframe_url>https?://.*?\.m3u8\?embed=true)"', html_content)
+        if not iframe_match:
+            return False
+
+        # Get channel playlist URL
+        headers = {**HEADERS, 'Referer': url}
+        embed_url = iframe_match.group('iframe_url')
+
+        async with session.get(url=embed_url, timeout=timeout, headers=headers) as response:
+            html_frame = await response.text()
+            playlist_match = re.search(r'\'(?P<playlist_url>https?://.*?\.m3u8)\'', html_frame)
+            if not playlist_match:
+                return False
+
+            # Check if it's a valid playlist
+            playlist_url = playlist_match.group('playlist_url')
+            referer_url = 'http://azureedge.xyz/'
+            headers = {**HEADERS, 'Referer': referer_url}
+
+            if await is_valid_playlist_url(playlist_url, headers, session):
+                channel['stream_url'] = furl(playlist_url)
+                channel['referer_url'] = referer_url
+                return True
+
+        return False
+
+    async def retrieve_obfuscated_channel(html_content: str, session: aiohttp.ClientSession) -> bool:
+        decoded_url = extract_obfuscated_link(html_content)
+        if not decoded_url:
+            return False
+
+        referer_url = url.rstrip('/') + '/'
+        headers = {**HEADERS, 'Referer': referer_url}
+
+        async with session.get(url=decoded_url, timeout=timeout, headers=headers) as response:
+            master_playlist_obj = await response.json()
+            master_playlist_url = master_playlist_obj[0]['file']
+
+            async with session.get(url=master_playlist_url, timeout=timeout, headers=headers) as response:
+                master_playlist_content = await response.text()
+
+                playlist_match = re.search(r'(?P<playlist_url>^[^#].*\.m3u8.*$)',
+                                           master_playlist_content, re.M)
+                if playlist_match:
+                    playlist_url = ensure_absolute_url(playlist_match.group('playlist_url'),
+                                                       master_playlist_url)
+
+                    if await is_valid_playlist_url(playlist_url, headers, session):
+                        channel['stream_url'] = furl(playlist_url)
+                        channel['referer_url'] = referer_url
+                        return True
+
+        return False
+
+    for key in ('stream_url', 'referer_url'):
+        channel.pop(key, None)  # type: ignore
+
     while True:
         try:
             async with aiohttp.TCPConnector(ssl=False) as connector:
                 async with aiohttp.ClientSession(raise_for_status=True, connector=connector) as session:
                     async with session.get(url=url, timeout=timeout) as response:
-                        # Get channel iframe
-                        resp_html = await response.text()
-                        match = re.search(r'"(?P<iframe_url>https?://.*?\.m3u8\?embed=true)"', resp_html)
-                        if not match:
-                            return None
+                        html_content = await response.text()
 
-                        # Get channel playlist URL
-                        headers = {**HEADERS, 'Referer': url}
-                        embed_url = match.group('iframe_url')
-                        async with session.get(url=embed_url, timeout=timeout, headers=headers) as response:
-                            resp_html = await response.text()
-                            match = re.search(r'\'(?P<stream_url>https?://.*?\.m3u8)\'', resp_html)
-                            if not match:
-                                return None
+                        for retriever in (retrieve_regular_channel, retrieve_obfuscated_channel):
+                            if await retriever(html_content, session):
+                                return channel
 
-                            # Check if it's a valid playlist
-                            stream_url = match.group('stream_url')
-                            async with session.get(url=stream_url, timeout=timeout,
-                                                   headers=HEADERS) as response:
-                                resp_m3u8 = await response.text()
-                                if resp_m3u8.startswith('#EXTM3U'):
-                                    channel['stream_url'] = furl(stream_url)
-                                    return channel
-
+                        logger.info('No stream URL found for channel "%s".', channel['name'])
                         return None
 
         except Exception as e:
-            is_exc_valid = any([isinstance(e, exc) for exc in exceptions])
+            is_exc_valid = any(isinstance(e, exc) for exc in exceptions)
             if not is_exc_valid:
                 raise
 
             timeout = min(timeout + 1, max_timeout)
             max_retries -= 1
             if max_retries <= 0:
-                logger.error('Failed to get url %s', url)
+                logger.debug('Failed to retrieve channel "%s" (%s).', channel['name'], url)
                 return None
 
 
@@ -165,36 +269,71 @@ def render_playlist(channels: List[Channel], host: str, use_uncompressed_tvguide
         tvg_compressed_ext = '' if use_uncompressed_tvguide else '.gz'
         tvg_url = base_url / f'tvguide.xml{tvg_compressed_ext}'
 
-        f.write('#EXTM3U url-tvg="%s" refresh="1800"\n\n' % tvg_url)
+        f.write('#EXTM3U url-tvg="%s" refresh="3600"\n\n' % tvg_url)
         for channel in channels:
-            if channel.get('stream_url'):
-                tvg_logo = base_url / 'logos' / (channel['ustvgo_id'] + '.png')
-                stream_url = base_url / (channel['stream_id'] + '.m3u8')
+            tvg_logo = base_url / 'logos' / (channel['stream_id'] + '.png')
+            stream_url = base_url / (channel['stream_id'] + '.m3u8')
 
-                f.write(('#EXTINF:-1 tvg-id="{0[ustvgo_id]}" tvg-logo="{1}" '
-                         'group-title="{0[category]}",{0[name]}\n'.format(channel, tvg_logo)))
-                f.write(f'{stream_url}\n\n')
+            f.write(('#EXTINF:-1 tvg-id="{0[stream_id]}" tvg-logo="{1}" '
+                     'group-title="{0[category]}",{0[name]}\n'.format(channel, tvg_logo)))
+            f.write(f'{stream_url}\n\n')
 
         return f.getvalue()
 
 
-async def collect_urls(channels: List[Channel], parallel: int) -> List[Channel]:
+async def collect_urls(channels: List[Channel], parallel: int,
+                       do_not_filter_channels: bool) -> List[Channel]:
     """Collect channel stream URLs from 123tv.live web players."""
     logger.info('Extracting stream URLs from 123TV. Parallel requests: %d.', parallel)
     retrieve_tasks = [retrieve_stream_url(channel) for channel in channels]
-    channels = await gather_with_concurrency(parallel, *retrieve_tasks,
-                                             progress_title='Collect URLs')
+    retrieved_channels = await gather_with_concurrency(parallel, *retrieve_tasks,
+                                                       progress_title='Collect URLs')
 
-    channels_ok = [x for x in channels if x]
+    channels_ok = channels if do_not_filter_channels else \
+        [x for x in retrieved_channels if x]
+
     report_msg = 'Extracted %d channels out of %d.'
     logger.info(report_msg, len(channels_ok), len(channels))
 
     return channels_ok
 
 
+def preprocess_playlist(content: str, referer_url: str, response_url: Optional[str] = None) -> str:
+    """Augment playlist with referer argument, make relative URLs absolute
+    if `response_url` is specified, add chunks prefix path for absolute URLs."""
+    if content.startswith('#EXTM3U'):
+        content_lines = []
+        for line in content.splitlines():
+            if not line.startswith('#'):
+                # Ensure URL is absolute
+                if response_url:
+                    line = ensure_absolute_url(line, response_url)
+
+                # Add referer argument
+                line = furl(line).add(args={'referer': referer_url}).url
+
+            content_lines.append(line)
+
+        content = '\n'.join(content_lines)
+
+        # Add chunks redirect prefix path
+        content = re.sub(r'(?<=\n)(https?)://', r'/chunks/\1/', content)
+
+    return content
+
+
 async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
                           access_logs: bool, icons_for_light_bg: bool,
-                          use_uncompressed_tvguide: bool) -> None:
+                          use_uncompressed_tvguide: bool,
+                          do_not_filter_channels: bool) -> None:
+    async def refresh_auth_key(channel: Channel) -> None:
+        """Refresh auth key for the channel."""
+        async with channel['refresh_lock']:
+            if time.time() - channel['last_time_refreshed'] > 5:
+                logger.info('Refreshing auth key for channel %s.', channel['name'])
+                await retrieve_stream_url(channel, 2)
+                channel['last_time_refreshed'] = time.time()
+
     """Run proxying server with keys rotation."""
     async def master_handler(request: web.Request) -> web.Response:
         """Master playlist handler."""
@@ -222,9 +361,10 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
         """AES keys handler."""
         url = furl('http://hls.123tv.live/key/').add(path=request.match_info.get('keypath')).url
         async with aiohttp.TCPConnector(ssl=False, force_close=True) as connector:
+            headers = {**HEADERS, 'Referer': 'http://azureedge.xyz/'}
             async with aiohttp.request(
                 method=request.method, url=url,
-                headers=HEADERS, connector=connector
+                headers=headers, connector=connector
             ) as response:
                 content = await response.read()
 
@@ -237,7 +377,7 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
         is_compressed = request.path.endswith('.gz')
         compressed_ext = '.gz' if is_compressed else ''
         color_scheme = 'for-light-bg' if icons_for_light_bg else 'for-dark-bg'
-        tvguide_filename = f'ustvgo.{color_scheme}.xml{compressed_ext}'
+        tvguide_filename = f'123tv.{color_scheme}.xml{compressed_ext}'
         tvguide_url = furl(tvguide_base_url).add(path=tvguide_filename).url
 
         async with aiohttp.TCPConnector(ssl=False, force_close=True) as connector:
@@ -258,73 +398,65 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
             return web.Response(text='Stream not found!', status=404)
 
         channel = streams[stream_id]
-        headers = {name: value for name, value in request.headers.items()
-                   if name not in (aiohttp.hdrs.HOST, aiohttp.hdrs.USER_AGENT)}
-        headers = {**headers, **HEADERS}
-        max_retries = 2  # Second retry for auth keys refreshing
 
-        for _ in range(max_retries):
-            async with aiohttp.TCPConnector(ssl=False, force_close=True) as connector:
-                async with aiohttp.request(
-                    method=request.method, url=channel['stream_url'].url,
-                    headers=headers, connector=connector
-                ) as response:
-                    # Proxy playlist's chunks
-                    content = await response.text()
-                    content = re.sub(r'(?<=\n)(https?)://', r'/chunks/\1/', content)
+        # If you specified --do-not-filter-channels
+        # you could meet a channel without stream_url
+        if 'stream_url' not in channel:
+            # Try to refresh empty channel
+            await refresh_auth_key(channel)
 
-                    # Check if we need a key / the keys refresh
-                    if response.status == 410:
-                        if AUTH_KEY_REFRESH_POLICY == AuthKeyRefreshPolicy.REFRESH_ONE_AT_A_TIME:
+        if 'stream_url' in channel:
+            headers = {name: value for name, value in request.headers.items()
+                       if name not in (aiohttp.hdrs.HOST, aiohttp.hdrs.USER_AGENT)}
+            headers = {**headers, **HEADERS, 'Referer': channel['referer_url']}
+
+            max_retries = 2  # Second retry for auth keys refreshing
+            for _ in range(max_retries):
+                async with aiohttp.TCPConnector(ssl=False, force_close=True) as connector:
+                    async with aiohttp.request(
+                        method=request.method, url=channel['stream_url'].url,
+                        headers=headers, connector=connector
+                    ) as response:
+                        # Get playlist content
+                        content = await response.text()
+
+                        # Check if the channel's key is expired
+                        if not content.startswith('#EXTM3U'):
                             # Lazy auth key update
-                            async with channel['refresh_lock']:
-                                if time.time() - channel['last_time_refreshed'] > 5:
-                                    logger.info('Refreshing auth key for channel %s.', channel['name'])
-                                    await retrieve_stream_url(channel, 2)
-                                    channel['last_time_refreshed'] = time.time()
+                            await refresh_auth_key(channel)
+                            continue
 
-                        elif AUTH_KEY_REFRESH_POLICY == AuthKeyRefreshPolicy.REFRESH_ALL_AT_ONCE:
-                            # Update all the channels keys at once
-                            async with channels_refresh_lock:
-                                nonlocal channels_last_time_refreshed  # type: ignore
-                                if time.time() - channels_last_time_refreshed > 5:
-                                    logger.info('Refreshing auth keys for all the channels.')
-                                    await collect_urls(channels, parallel)
-                                    channels_last_time_refreshed = time.time()
+                        # Preprocess playlist content
+                        content = preprocess_playlist(content, channel['referer_url'],
+                                                      channel['stream_url'].url)
 
-                        else:
-                            raise ValueError('Unknown strategy for auth key refreshing.')
+                        # OK
+                        return web.Response(text=content, status=200)
 
-                        continue
-
-                    # Not a valid playlist
-                    if not content.startswith('#EXTM3U'):
-                        logger.warning('%s returned invalid playlist: %s', response.url, content)
-                        notfound_segment_url = furl(tvguide_base_url) / 'assets/404.ts'
-                        return web.Response(text=(
-                            '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:10\n'
-                            f'#EXTINF:10.000\n{notfound_segment_url}\n#EXT-X-ENDLIST'
-                        ))
-
-                    # OK
-                    return web.Response(text=content, status=200)
-
-        # Failed to get new auth key / keys
-        return web.Response(status=403)
+        # Empty channel, not a valid playlist, failed to get new auth key
+        logger.warning('Channel "%s" returned invalid playlist.', channel['name'])
+        notfound_segment_url = furl(tvguide_base_url) / 'assets/404.ts'
+        return web.Response(text=(
+            '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:10\n'
+            f'#EXTINF:10.000\n{notfound_segment_url}\n#EXT-X-ENDLIST'
+        ))
 
     async def chunks_handler(request: web.Request) -> web.Response:
         """Chunks handler."""
+        upstream_url = '{0[schema]}://{0[chunk_url]}'.format(request.match_info)
+        upstream_query = {**request.query}
+        referer_url = upstream_query.pop('referer', 'http://123tv.live/')
+
         headers = {name: value for name, value in request.headers.items()
                    if name not in (aiohttp.hdrs.HOST, aiohttp.hdrs.USER_AGENT)}
-        headers = {**headers, **HEADERS}
-        url = '{0[schema]}://{0[chunk_url]}'.format(request.match_info)
-        max_retries = 2  # Second retry for response payload errors recovering
+        headers = {**headers, **HEADERS, 'Referer': referer_url}
 
+        max_retries = 2  # Second retry for response payload errors recovering
         for retry in range(1, max_retries + 1):
             try:
                 async with aiohttp.TCPConnector(ssl=False, force_close=True) as connector:
                     async with aiohttp.request(
-                        method=request.method, url=url, params=request.query,
+                        method=request.method, url=upstream_url, params=upstream_query,
                         headers=headers, raise_for_status=True, connector=connector
                     ) as response:
 
@@ -359,25 +491,15 @@ async def playlist_server(port: int, parallel: bool, tvguide_base_url: str,
     channels = load_dict('channels.json')
 
     # Retrieve available channels with their stream urls
-    channels = await collect_urls(channels, parallel)
+    channels = await collect_urls(channels, parallel, do_not_filter_channels)
     if not channels:
         logger.error('No channels were retrieved!')
         return
 
     # Add channels sync tools
-    if AUTH_KEY_REFRESH_POLICY == AuthKeyRefreshPolicy.REFRESH_ONE_AT_A_TIME:
-        # Lazy auth key refresh
-        for channel in channels:
-            channel['refresh_lock'] = asyncio.Lock()  # Lock on a key refresh
-            channel['last_time_refreshed'] = .0  # Time of the last key refresh
-
-    elif AUTH_KEY_REFRESH_POLICY == AuthKeyRefreshPolicy.REFRESH_ALL_AT_ONCE:
-        # Refresh all the keys at once
-        channels_refresh_lock = asyncio.Lock()  # Lock on the keys refresh
-        channels_last_time_refreshed = .0  # Time of the last keys refresh
-
-    else:
-        raise ValueError('Unknown strategy for auth key refreshing.')
+    for channel in channels:
+        channel['refresh_lock'] = asyncio.Lock()  # Lock on a key refresh
+        channel['last_time_refreshed'] = .0  # Time of the last key refresh
 
     # Transform list into a map for better accessibility
     streams = {x['stream_id']: x for x in channels}
@@ -536,7 +658,7 @@ def args_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         '-t', '--parallel', metavar='N',
-        type=int_range(min_value=1), default=10,
+        type=int_range(min_value=1), default=15,
         help='Number of parallel parsing requests (default: %(default)s)'
     )
     parser.add_argument(
@@ -549,8 +671,13 @@ def args_parser() -> argparse.ArgumentParser:
         help='Enable access logging'
     )
     parser.add_argument(
+        '--do-not-filter-channels',
+        action='store_true',
+        help='Do not filter out not working channels'
+    ),
+    parser.add_argument(
         '--tvguide-base-url', metavar='URL',
-        default='https://raw.githubusercontent.com/interlark/ustvgo-tvguide/master',
+        default='https://raw.githubusercontent.com/interlark/123tv-tvguide/master',
         help='Base TV Guide URL'
     )
     parser.add_argument(
