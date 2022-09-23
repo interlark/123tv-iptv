@@ -62,6 +62,12 @@ async def app() -> None:
                                         tooltip='Use uncompressed TV Guide in master playlist'),
                         ]], p=0, expand_x=True),
                         sg.Column([[
+                            sg.Checkbox(text='Keep all channels',
+                                        default=settings['keep_all_channels'],
+                                        key='-CHECK_KEEP_ALL_CHANNELS-',
+                                        tooltip='Do not filter out not working channels'),
+                        ]], p=0, expand_x=True),
+                        sg.Column([[
                             sg.Text('Parallel', key='-LBL_PARALLEL-',
                                     tooltip='Number of parallel parsing requests'),
                             sg.Spin(list(range(1, 15 + 1)),
@@ -116,7 +122,7 @@ async def app() -> None:
                       menu_paste=True, menu_cut=True, menu_copy=True)
 
     # Set disabled color
-    for key in ('-CHECK_ICONS_FOR_LIGHT_BG-', '-CHECK_ACCESS_LOGS-',
+    for key in ('-CHECK_ICONS_FOR_LIGHT_BG-', '-CHECK_ACCESS_LOGS-', '-CHECK_KEEP_ALL_CHANNELS-',
                 '-CHECK_UNCOMPRESSED_TVGUIDE-', '-LBL_PORT-', '-LBL_PARALLEL-'):
         window[key].widget.config(disabledforeground='snow3')
 
@@ -144,6 +150,7 @@ async def app() -> None:
         settings['use_uncompressed_tvguide'] = window['-CHECK_UNCOMPRESSED_TVGUIDE-'].get()
         settings['icons_for_light_bg'] = window['-CHECK_ICONS_FOR_LIGHT_BG-'].get()
         settings['access_logs'] = window['-CHECK_ACCESS_LOGS-'].get()
+        settings['keep_all_channels'] = window['-CHECK_KEEP_ALL_CHANNELS-'].get()
         return True
 
     # Controls locking during background tasks running
@@ -153,7 +160,8 @@ async def app() -> None:
                 window[key].widget.configure(state='disabled' if state else 'normal')
 
             for key in ('-IN_PORT-', '-IN_PARALLEL-', '-CHECK_ICONS_FOR_LIGHT_BG-',
-                        '-CHECK_ACCESS_LOGS-', '-CHECK_UNCOMPRESSED_TVGUIDE-'):
+                        '-CHECK_ACCESS_LOGS-', '-CHECK_UNCOMPRESSED_TVGUIDE-',
+                        '-CHECK_KEEP_ALL_CHANNELS-'):
                 window[key].update(disabled=state)
 
             window['-BTN_STOP-'].update(visible=state)
@@ -205,9 +213,14 @@ async def app() -> None:
 
         # Click "Start"
         elif event == '-BTN_START-':
+            # Sync settings
             if not sync_settings():
                 continue
 
+            # Save settings
+            save_settings(settings)
+
+            # Lock user inputs
             lock_controls()
 
             loop = asyncio.get_running_loop()
@@ -226,9 +239,5 @@ async def app() -> None:
         elif event == '@PROGRESS_UPDATE':
             n, total = values['@PROGRESS_UPDATE']
             window['-PROGRESSBAR-'].update(current_count=n, max=total)
-
-    # Save settings before exit
-    sync_settings(verbose=False)
-    save_settings(settings)
 
     window.close()

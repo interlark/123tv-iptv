@@ -68,6 +68,7 @@ try:
         '--hidden-import', 'aiohttp',
         '--hidden-import', 'netifaces',
         '--hidden-import', 'furl',
+        '--hidden-import', 'pyaes',
     ]
 
     cmd_line = ' '.join(str(arg) for arg in build_cmd)
