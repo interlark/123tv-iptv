@@ -117,9 +117,12 @@ def extract_obfuscated_link(content: str) -> str:
         """
     )
 
-    ob_line = content[content.index(start_text) + len(start_text):].splitlines()[0]
-    a, b, c = ob_line.split('};')
     data_part, key = '', ''
+    ob_line = content[content.index(start_text) + len(start_text):].splitlines()[0]
+    try:
+        a, b, c = ob_line.split('};')
+    except ValueError:
+        return ''
 
     # Parse data
     arr = re.search(r'(?<=\[)[^\]]+(?=\])', a)
