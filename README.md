@@ -8,7 +8,7 @@
 
 
 <div align="center">
-    <a href="https://github.com/interlark/ustvgo-tvguide/actions/workflows/tvguide.yml"><img alt="TV Guide status" src="https://github.com/interlark/ustvgo-tvguide/actions/workflows/tvguide.yml/badge.svg"/></a>
+    <a href="https://github.com/interlark/123tv-tvguide/actions/workflows/tvguide.yml"><img alt="TV Guide status" src="https://github.com/interlark/123tv-tvguide/actions/workflows/tvguide.yml/badge.svg"/></a>
     <a href="https://pypi.org/project/123tv-iptv"><img alt="PyPi version" src="https://badgen.net/pypi/v/123tv-iptv"/></a>
     <a href="https://pypi.org/project/123tv-iptv"><img alt="Supported platforms" src="https://badgen.net/badge/platform/Linux,macOS,Windows?list=|"/></a>
 </div><br>
@@ -22,9 +22,9 @@ It **extracts stream URLs** from [123tv.live](http://123tv.live/) website, **gen
 ## ✨ Features
 - 🔑 Auto auth-key rotation
   > As server proxies the traffic it can detect if your auth key is expired and refresh it on the fly.
-- 📺 Available [TV Guide](https://github.com/interlark/ustvgo-tvguide)
-  > [TV Guide](https://github.com/interlark/ustvgo-tvguide) repo generates EPG XML for upcoming programs of all the channels twice an hour.
-- [![](https://user-images.githubusercontent.com/20641837/173175879-aed31bd4-b188-4681-89df-5ffc3ea05a82.svg)](https://github.com/interlark/ustvgo-tvguide/tree/master/images/icons/channels)
+- 📺 Available [TV Guide](https://github.com/interlark/123tv-tvguide)
+  > [TV Guide](https://github.com/interlark/123tv-tvguide) repo generates EPG XML for upcoming programs of all the channels once an hour.
+- [![](https://user-images.githubusercontent.com/20641837/173175879-aed31bd4-b188-4681-89df-5ffc3ea05a82.svg)](https://github.com/interlark/123tv-tvguide/tree/master/images/icons/channels)
 Two iconsets for IPTV players with light and dark backgrounds
   > There are 2 channel iconsets adapted for apps with light and dark UI themes.
 - 🗔 Cross-platform GUI
@@ -93,7 +93,7 @@ sudo -E env "PATH=$PATH" 123tv-iptv uninstall-service
 ## 🔗 URLs
 To play and enjoy your free IPTV you need 2 URLs that this app provides:
 1) Your generated **master playlist**: 🔗 http://127.0.0.1:6464/123tv.m3u8
-2) **TV Guide** (content updates twice an hour): 🔗 http://127.0.0.1:6464/tvguide.xml
+2) **TV Guide** (content updates once an hour): 🔗 http://127.0.0.1:6464/tvguide.xml
 
 ## ▶️ Players
   Here is a **list** of popular IPTV players.
@@ -181,3 +181,8 @@ To play and enjoy your free IPTV you need 2 URLs that this app provides:
       1) Add via URL -> http://127.0.0.1:6464/123tv.m3u8
       2) Settings -> EPG Url -> http://127.0.0.1:6464/tvguide.xml.gz
       ```
+
+## 👍 Support
+- [123tv.live](http://123tv.live/) is wonderful project which can offer you a free IPTV, please support these guys buying VPN with their referral link.
+
+- Also I would highly appreciate your support on this project ⠀<a href="https://www.buymeacoffee.com/interlark" target="_blank"><img alt="Buy Me A Coffee" src="https://cdn.buymeacoffee.com/buttons/default-orange.png" width="178" height="41"></a>
